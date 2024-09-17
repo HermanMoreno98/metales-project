@@ -1,19 +1,35 @@
+// Crear el mapa
 var map = L.map('map').setView([-9.19, -75.0152], 5);
-// Añade un mapa base
-L.tileLayer('http://www.google.cn/maps/vt?lyrs=s@189&gl=cn&x={x}&y={y}&z={z}', {
-    attribution: 'Google Maps',
+
+// Definir capas base (Base layers)
+var baseMap = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 18,
+    attribution: 'OpenStreetMap'
 }).addTo(map);
 
-var reservoirIcon = L.icon({
-    iconUrl: 'https://cdn-icons-png.flaticon.com/512/1843/1843893.png',
-    iconSize: [30, 30], // Tamaño del ícono
-    iconAnchor: [15, 30], // Punto de anclaje del ícono (donde se coloca en el marcador)
-    popupAnchor: [0, -30] // Punto de anclaje del popup del marcador
+var esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 18,
+    attribution: 'Esri'
 });
-var geojsonLayers = {};
 
-function addGeoJSONLayer(url, objectName, styleOptions, labelProperty) {
+var terrain = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: 'OpenTopoMap'
+});
+
+// Definir capas de superposición (Overlay layers) 
+var departamento = L.layerGroup();  // Estas capas pueden tener contenido
+var provincia = L.layerGroup();
+var distrito = L.layerGroup();
+var reservorio = L.layerGroup();
+var captacion = L.layerGroup();
+var ptap = L.layerGroup();
+var rios = L.layerGroup();
+var sectores = L.layerGroup();
+var rios = L.layerGroup();
+var ana_uh = L.layerGroup();
+
+function addGeoJSONLayer(url, objectName, styleOptions, labelProperty, layer, selectedDept, applyFilter = false, labelPrueba = null, tooltipProperty = null) {
     fetch(url)
         .then(response => {
             if (!response.ok) {
@@ -22,22 +38,51 @@ function addGeoJSONLayer(url, objectName, styleOptions, labelProperty) {
             return response.json();
         })
         .then(data => {
-            var geojsonData = topojson.feature(data, data.objects[objectName]);
+            layer.clearLayers(); // Limpiar capas anteriores
+
+            let geojsonData;
+
+            // Verificar si es TopoJSON
+            if (data.type === 'Topology' && data.objects && Object.keys(data.objects).length > 0) {
+                // Convertir TopoJSON a GeoJSON
+                geojsonData = topojson.feature(data, data.objects[objectName]);
+            } else {
+                // Asumir que es GeoJSON
+                geojsonData = data;
+            }
+
             var geojsonLayer = L.geoJSON(geojsonData, {
                 style: styleOptions,
+                filter: function(feature) {
+                    // Aplicar filtro solo si applyFilter es true
+                    return applyFilter ? feature.properties[labelProperty] === selectedDept : true;
+                },
                 onEachFeature: function (feature, layer) {
-                    if (feature.properties && feature.properties[labelProperty]) {
-                        layer.bindTooltip(feature.properties[labelProperty], {
+                    // Mostrar el tooltip si 'labelPrueba' está definido
+                    if (labelPrueba && feature.properties && feature.properties[labelPrueba]) {
+                        layer.bindTooltip(feature.properties[labelPrueba], {
+                            permanent: true,
+                            direction: "center",
+                            className: "label-tooltip"
+                        }).openTooltip();
+                    } else if (tooltipProperty && feature.properties[tooltipProperty]) {
+                        // Mostrar el tooltip si 'tooltipProperty' está definido
+                        var tooltipText = feature.properties[tooltipProperty];
+                        layer.bindTooltip(tooltipText, {
                             permanent: true,
                             direction: "center",
                             className: "label-tooltip"
                         }).openTooltip();
                     }
+                    if (feature.geometry && feature.geometry.type === "Point") {
+                        var coords = feature.geometry.coordinates;
+                        L.marker([coords[1], coords[0]]).addTo(layer);
+                    }
                 }
             });
 
             // Añadir la capa GeoJSON al mapa
-            geojsonLayer.addTo(map);
+            geojsonLayer.addTo(layer);
 
             geojsonLayers[objectName] = geojsonLayer;
         })
@@ -45,6 +90,57 @@ function addGeoJSONLayer(url, objectName, styleOptions, labelProperty) {
             console.error('Error fetching or parsing GeoJSON data:', error);
         });
 }
+
+
+function addCombinedGeoJSONLayers(url1, url2, layer, styleOptions,o1,o2,selectedDept,labelProperty) {
+    // Obtener y combinar datos de las dos URLs
+    Promise.all([fetch(url1), fetch(url2)])
+        .then(responses => Promise.all(responses.map(response => response.json())))
+        .then(([data1, data2]) => {
+            let combinedData;
+
+            // Verificar si los datos son TopoJSON y convertir a GeoJSON si es necesario
+            const convertToGeoJSON = (data, objectName) => {
+                if (data.type === 'Topology' && data.objects && Object.keys(data.objects).length > 0) {
+                    return topojson.feature(data, data.objects[objectName]);
+                } else {
+                    return data;
+                }
+            };
+
+            // Convertir a GeoJSON si es TopoJSON
+            const geojsonData1 = convertToGeoJSON(data1, o1); // Cambiar 'objectName1' según corresponda
+            const geojsonData2 = convertToGeoJSON(data2, o2); // Cambiar 'objectName2' según corresponda
+
+            // Combinar los datos GeoJSON
+            combinedData = {
+                type: "FeatureCollection",
+                features: [...geojsonData1.features, ...geojsonData2.features]
+            };
+
+            // Crear la capa GeoJSON combinada
+            var combinedLayer = L.geoJSON(combinedData, {
+                style: styleOptions,
+                filter: function(feature) {
+                    return feature.properties[labelProperty] === selectedDept; // Filtrar por nombre de departamento
+                },
+                onEachFeature: function (feature, layer) {
+                    // Opcional: Añadir tooltips, popups, etc.
+                    
+                }
+            });
+
+            // Limpiar capas anteriores y agregar la capa combinada al mapa
+            layer.clearLayers();
+            combinedLayer.addTo(layer);
+
+        })
+        .catch(error => {
+            console.error('Error fetching or parsing GeoJSON data:', error);
+        });
+}
+
+
 
 function toggleGeoJSONLayer(layer) {
     if (map.hasLayer(layer)) {
@@ -54,24 +150,144 @@ function toggleGeoJSONLayer(layer) {
     }
 }
 
-// Llamar a la función para agregar las capas GeoJSON con estilos personalizados
-var layerStyles = {
-    geojsonLayer: {
-        color: "black",
-        weight: 2,
-        opacity: 1,
-        fillOpacity: 0
-    },
-    geojsonSectores: {
-        color: "red",
-        weight: 2,
-        opacity: 1,
-        fillOpacity: 0.5
-    }
-};
+// // Llamar a la función para agregar las capas GeoJSON con estilos personalizados
+// var layerStyles = {
+//     geojsonLayer: {
+//         color: "black",
+//         weight: 3,
+//         opacity: 1,
+//         fillOpacity: 0
+//     },
+//     geojsonLayerProv: {
+//         color: "black",
+//         weight: 2,
+//         opacity: 1,
+//         fillOpacity: 0
+//     },
+//     geojsonLayerDist: {
+//         color: "black",
+//         weight: 1,
+//         opacity: 1,
+//         fillOpacity: 0,
+//         dashArray: "5, 5"
+//     },
+//     geojsonSectores: {
+//         color: "red",
+//         weight: 2,
+//         opacity: 1,
+//         fillOpacity: 0.5
+//     }
+// };
 
-addGeoJSONLayer('https://raw.githubusercontent.com/HermanMoreno98/DATA_DASH/main/depa.json', 'depa', layerStyles['geojsonLayer'], 'nomdep'); // Asegúrate de que la propiedad de etiqueta sea 'name'
-addGeoJSONLayer('https://raw.githubusercontent.com/HermanMoreno98/DATA_DASH/main/sectores_op.json', 'sectores_op', layerStyles['geojsonSectores'], 'name'); // Asegúrate de que la propiedad de etiqueta sea 'name'
+
+document.addEventListener('DOMContentLoaded', function() {
+    const departamentoSelect = document.getElementById('departamento');
+
+    if (departamentoSelect) {
+        departamentoSelect.addEventListener('change', function(e) {
+            const selectedDept = e.target.value;
+            console.log(selectedDept);
+
+            if (selectedDept !== "Seleccionar todos los departamentos") {
+                // Cargar y filtrar la capa GeoJSON
+                addGeoJSONLayer(
+                    'https://raw.githubusercontent.com/HermanMoreno98/DATA_DASH/main/sectores_op.json', 
+                    'sectores_op', 
+                    {color: 'blue', weight: 2}, // Estilo de los polígonos
+                    'nomdep', // Propiedad a filtrar
+                    sectores, // Capa en el mapa donde se añadirá el geojson
+                    selectedDept, // Departamento seleccionado
+                    applyFilter = true,
+                    null,
+                    null
+                );
+                addGeoJSONLayer(
+                    'https://raw.githubusercontent.com/HermanMoreno98/DATA_DASH/main/prov.json', 
+                    'prov', 
+                    {color: 'black', weight: 2, opacity: 1, fillOpacity: 0}, // Estilo de los polígonos
+                    'nomdep', // Propiedad a filtrar
+                    provincia, // Capa en el mapa donde se añadirá el geojson
+                    selectedDept, // Departamento seleccionado
+                    applyFilter = true,
+                    'nomprov'
+                );
+                addGeoJSONLayer(
+                    'https://raw.githubusercontent.com/HermanMoreno98/DATA_DASH/main/Capas/dist.json', 
+                    'dist', 
+                    {color: 'black', weight: 1, opacity: 1, fillOpacity: 0, dashArray: "5, 5"}, 
+                    'nomdep', // Propiedad a filtrar
+                    distrito, // Capa en el mapa donde se añadirá el geojson
+                    selectedDept, // Departamento seleccionado
+                    applyFilter = true,
+                    'nomdist',null
+                );
+                addGeoJSONLayer(
+                    'https://raw.githubusercontent.com/HermanMoreno98/DATA_DASH/main/Capas/dist.json', 
+                    'dist', 
+                    {color: 'black', weight: 1, opacity: 1, fillOpacity: 0, dashArray: "5, 5"}, 
+                    'nomdep', // Propiedad a filtrar
+                    distrito, // Capa en el mapa donde se añadirá el geojson
+                    selectedDept, // Departamento seleccionado
+                    applyFilter = true,
+                    'nomdist',null
+                );
+                addCombinedGeoJSONLayers(
+                    'https://raw.githubusercontent.com/HermanMoreno98/DATA_DASH/main/Capas/rios_nacional_1.json',
+                    'https://raw.githubusercontent.com/HermanMoreno98/DATA_DASH/main/Capas/rios_nacional_2.json',
+                    rios, // Capa en el mapa donde se añadirá el geojson combinado
+                    {color: 'blue', weight: 2}, 
+                    "rios_nacional_1","rios_nacional_2",selectedDept,'nomdep'
+                );
+                addGeoJSONLayer(
+                    'https://raw.githubusercontent.com/HermanMoreno98/DATA_DASH/main/Capas/Ana_uh.json', 
+                    'Ana_uh', 
+                    {color: 'cyan', weight: 1, opacity: 0.5, fillOpacity: 0.4}, 
+                    'nomdep', // Propiedad a filtrar
+                    ana_uh, // Capa en el mapa donde se añadirá el geojson
+                    selectedDept, // Departamento seleccionado
+                    applyFilter = false,
+                    'nombre',null
+                );
+            }
+        });
+    } else {
+        console.error("No se encontró el elemento con id 'departamento'.");
+    }
+});
+
+// Crear el control de capas con etiquetas HTML e íconos
+L.control.layers(
+    {
+        "Base Map": baseMap,
+        "Esri": esri,
+        "Terrain": terrain
+    },
+    {
+        "Departamento": departamento,
+        "Provincia": provincia,
+        "Distrito<hr><strong>Infraestructura de saneamiento:</strong>": distrito,
+        "Reservorio <img src='https://cdn-icons-png.flaticon.com/512/1843/1843893.png' width='20' height='20'>": reservorio,
+        "Captacion <img src='https://cdn-icons-png.flaticon.com/512/5371/5371132.png' width='20' height='20'>": captacion,
+        "PTAP <img src='https://cdn-icons-png.flaticon.com/512/8846/8846576.png' width='20' height='20'>": ptap,
+        "Rios <img src='https://www.kingtony.com/upload/products/87D11-071A-B_v.jpg' width='20' height='20'>": rios,
+        "Sectores": sectores, "Ana - UH": ana_uh
+    }
+).addTo(map);
+
+
+
+var reservoirIcon = L.icon({
+    iconUrl: 'https://cdn-icons-png.flaticon.com/512/1843/1843893.png',
+    iconSize: [30, 30], // Tamaño del ícono
+    iconAnchor: [15, 30], // Punto de anclaje del ícono (donde se coloca en el marcador)
+    popupAnchor: [0, -30] // Punto de anclaje del popup del marcador
+});
+var geojsonLayers = {};
+
+
+
+ // Asegúrate de que la propiedad de etiqueta sea 'name'
+
 
 // Función para alternar la visibilidad del sidebar
 function toggleSidebar() {
@@ -111,19 +327,6 @@ function fetchReservoirData() {
         });
 }
 
-// // Función para actualizar las opciones de un select
-// function updateSelectOptions(selectId, options) {
-//     let selectElement = document.getElementById(selectId);
-//     selectElement.innerHTML = ''; // Limpiar opciones actuales
-
-//     // Crear y añadir las nuevas opciones al select
-//     options.forEach(option => {
-//         let optionElement = document.createElement('option');
-//         optionElement.value = option;
-//         optionElement.textContent = option;
-//         selectElement.appendChild(optionElement);
-//     });
-// }
 
 let markersLayer = L.layerGroup();
 // Función para agregar marcadores de reservorio con popups personalizados
@@ -162,28 +365,6 @@ function addReservoirMarkers(data) {
     map.fitBounds(validMarkers);
 }
 }
-
-// function populateSelect(data) {
-//     const selectElement = document.getElementById('departamento');
-    
-//     // Obtener una lista única de departamentos
-//     const departamentos = [...new Set(data.map(item => item.DEPA))];
-//     console.log(departamentos)
-//     // Crear opciones y agregarlas al select
-//     departamentos.forEach(departamento => {
-//         const option = document.createElement('option');
-//         option.value = departamento;
-//         option.textContent = departamento;
-//         selectElement.appendChild(option);
-//     });
-// }
-
-// // Llamar a la función para obtener los datos y luego poblar el select
-// fetchReservoirData().then(data => {
-//     if (data) {
-//         addReservoirMarkers(data);
-//     }
-// });
 
 
 // Variable para almacenar los datos del CSV

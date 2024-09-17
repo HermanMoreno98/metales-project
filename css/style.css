@@ -3,7 +3,7 @@
     padding: 0;
     box-sizing: border-box;
     list-style: none;
-    color: #fff;
+    /* color: #fff; */
     font-family: Verdana, Geneva, Tahoma, sans-serif;
     transition: .2s;
 }
@@ -15,15 +15,16 @@ header{
     min-height: 50px;
 }
 header .title{
-    width: 350px;
+    width: 100%;
     background-color: #367fa9;
     text-align: center;
     align-content: center;
 }
 header .title h1{
-    font-size: 24px;
+    font-size: 15px;
     font-weight: bold;
     font-family: Georgia, 'Times New Roman', Times, serif;
+    color: #fff;
 }
 header .btn-burger{
     width: 50px;
@@ -136,7 +137,7 @@ main .content{
     gap: 15px;
 }
 main .content .map{
-    width: 75%;
+    width: 100%;
 }
 main .content .map .leaflet-map{
     height: 100%;
@@ -164,7 +165,7 @@ main .content .info-content .card{
     background-color: transparent; /* Fondo transparente */
     border: none; /* Sin borde */
     box-shadow: none; /* Sin sombra */
-    color: white; /* Color del texto */
+    /*color: white; /* Color del texto */
     font-size: 8px;
     font-weight: bold;
     }
